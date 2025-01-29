@@ -1,88 +1,158 @@
-#SRR14294834 Single Cell RNA-Seq Data Anaysis
+#!/usr/bin/env Rscript
 
+#===============================================================================
+# Single Cell RNA-Seq Data Analysis Pipeline
+# Dataset: SRR14294834
+#===============================================================================
+
+# Load required libraries
 library(Seurat)
 library(dplyr)
+library(ggplot2)
 
-# Open data count matrix -- excluded by Linux processes
-countmat = read.table('counts.txt', header=TRUE)
-dim(countmat)
-View(countmat)
+#-------------------------------------------------------------------------------
+# 1. Data Import and Initial Processing
+#-------------------------------------------------------------------------------
 
-# Detect first column as a row name
-rownames(countmat) = countmat[,1]
-View(countmat)
-countmat = countmat[,-1]
-View(countmat)
+# Import count matrix
+countmat <- read.table('counts.txt', header = TRUE)
+message("Initial dimensions: ", paste(dim(countmat), collapse = " x "))
 
-# 1) First filtering: Every genes must been in min 3 cells. Every cells must have min 200 genes
-srobj = CreateSeuratObject(countmat, project = 'SRR14294834', min.cells = 3, min.features = 200) 
-srobj
-srobj[['RNA']]@counts
+# Set row names and remove redundant first column
+rownames(countmat) <- countmat[,1]
+countmat <- countmat[,-1]
 
-# 2) Second filtering: Removing cells with more than 1 gene subset
-# Find Mitochondria genes percent in each cells
-srobj[['MTpercent']] = PercentageFeatureSet(srobj, pattern = '^MT-')
-srobj$MTpercent
-# Violin Plot
-# We can also save all the plots in a pdf etc., formats
-pdf(file='C:/Users/Newsha/Downloads/SingleCellBehrouz/Plots/SRR14294834_plots.pdf', width = 12, title = "SRR14294834")
-VlnPlot(srobj, features = c("nFeature_RNA", "nCount_RNA", "MTpercent", ncol(3)))
-# Scatter plot
-plot1 = FeatureScatter(srobj, feature1 = "nCount_RNA", feature2 = "MTpercent")
-plot2 = FeatureScatter(srobj, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
-plot1 + plot2
-# Removing cells with below min 200 and above max 800 genes and cells with above 16 mitochondrial genes
-srobj = subset(srobj, subset=nFeature_RNA>200 & nFeature_RNA<800 & MTpercent<16)
-dim(srobj)
-# Check again Plots
-VlnPlot(srobj, features = c("nFeature_RNA", "nCount_RNA", "MTpercent", ncol(3)),cols = 3)
-plot1 = FeatureScatter(srobj, feature1 = "nCount_RNA", feature2 = "MTpercent", cols = 3)
-plot2 = FeatureScatter(srobj, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", cols = 3)
-plot1 + plot2
+#-------------------------------------------------------------------------------
+# 2. Create Seurat Object with Initial Filtering
+#-------------------------------------------------------------------------------
+
+# Create Seurat object with minimal filtering criteria
+# Minimum 3 cells per gene, minimum 200 genes per cell
+srobj <- CreateSeuratObject(
+    countmat,
+    project = 'SRR14294834',
+    min.cells = 3,
+    min.features = 200
+)
+
+#-------------------------------------------------------------------------------
+# 3. Quality Control
+#-------------------------------------------------------------------------------
+
+# Calculate mitochondrial gene percentage
+srobj[['MTpercent']] <- PercentageFeatureSet(srobj, pattern = '^MT-')
+
+# Generate QC plots
+pdf('SRR14294834_QC_plots.pdf', width = 12)
+
+# Pre-filtering QC plots
+VlnPlot(srobj, features = c("nFeature_RNA", "nCount_RNA", "MTpercent"), ncol = 3)
+
+# Feature correlation plots
+plot1 <- FeatureScatter(srobj, feature1 = "nCount_RNA", feature2 = "MTpercent")
+plot2 <- FeatureScatter(srobj, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+print(plot1 + plot2)
+
+# Filter cells based on QC metrics
+srobj <- subset(srobj,
+    subset = nFeature_RNA > 200 &
+            nFeature_RNA < 800 &
+            MTpercent < 16
+)
+
+# Post-filtering QC plots
+VlnPlot(srobj, features = c("nFeature_RNA", "nCount_RNA", "MTpercent"), ncol = 3)
+plot1 <- FeatureScatter(srobj, feature1 = "nCount_RNA", feature2 = "MTpercent")
+plot2 <- FeatureScatter(srobj, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+print(plot1 + plot2)
+
 dev.off()
 
-# 3) Normalizing Data
-srobj = NormalizeData(srobj, normalization.method = "LogNormalize", scale.factor = 10000)
-srobj[["RNA"]]@data
+#-------------------------------------------------------------------------------
+# 4. Normalization and Feature Selection
+#-------------------------------------------------------------------------------
 
-# 4) Highest Variation Genes:
-library(ggplot2)
-srobj = FindVariableFeatures(srobj, selection.method = "vst", nfeatures = 2000)
-topVariableGenes = head(VariableFeatures(srobj), 15)
-plot1 = VariableFeaturePlot(srobj)
-plot2 = LabelPoints(plot=plot1, points = topVariableGenes, size=3, ynudge = 0.06, xnudge = -0.08)
-plot2
+# Normalize data
+srobj <- NormalizeData(
+    srobj,
+    normalization.method = "LogNormalize",
+    scale.factor = 10000
+)
 
-# 5) Centering and Scaling Data (Mean=0, Variance=1)
-srobj = ScaleData(srobj, features = rownames(srobj))
-dim(srobj[["RNA"]]@scale.data)
-mean(srobj[["RNA"]]@scale.data[,1])
-var(srobj[["RNA"]]@scale.data[,1])
+# Find variable features
+srobj <- FindVariableFeatures(
+    srobj,
+    selection.method = "vst",
+    nfeatures = 2000
+)
 
-# 6) Dimension Reduction
-srobj = RunPCA(srobj, features = VariableFeatures(srobj))
+# Plot variable features
+pdf('SRR14294834_variable_features.pdf', width = 10)
+top_variable_genes <- head(VariableFeatures(srobj), 15)
+plot1 <- VariableFeaturePlot(srobj)
+plot2 <- LabelPoints(
+    plot = plot1,
+    points = top_variable_genes,
+    size = 3,
+    ynudge = 0.06,
+    xnudge = -0.08
+)
+print(plot2)
+dev.off()
+
+#-------------------------------------------------------------------------------
+# 5. Data Scaling
+#-------------------------------------------------------------------------------
+
+# Scale data (mean = 0, variance = 1)
+srobj <- ScaleData(srobj, features = rownames(srobj))
+
+#-------------------------------------------------------------------------------
+# 6. Dimension Reduction and Analysis
+#-------------------------------------------------------------------------------
+
+# Run PCA
+srobj <- RunPCA(srobj, features = VariableFeatures(srobj))
+
+# Generate PCA analysis plots
+pdf('SRR14294834_PCA_analysis.pdf', width = 12)
 print(srobj[['pca']], dims = 1:10, nfeatures = 5)
 VizDimLoadings(srobj, dims = 1:2, reduction = "pca", ncol = 3)
 DimPlot(srobj, reduction = "pca")
 DimHeatmap(srobj, dims = 1, cells = 300)
 ElbowPlot(srobj)
 
-# 7) Determine Number of Dimensions
-srobj = JackStraw(srobj, num.replicate = 100)
-srobj = ScoreJackStraw(srobj, dims = 1:20)
+# Determine significant dimensions
+srobj <- JackStraw(srobj, num.replicate = 100)
+srobj <- ScoreJackStraw(srobj, dims = 1:20)
 JackStrawPlot(srobj, dims = 1:20)
 ElbowPlot(srobj)
+dev.off()
 
-# 8) Clustering (K Nearest Neighbors):
-srobj = FindNeighbors(srobj, dims = 1:13)
-srob = FindClusters(srobj, resolution = 0.5)
-Idents(srobj)
-levels(Idents(srobj))
-length(levels(Idents(srobj)))
-View(srobj)
+#-------------------------------------------------------------------------------
+# 7. Clustering Analysis
+#-------------------------------------------------------------------------------
 
-# 9) Non-Linear Dimension Reduction
-srobj = RunTSNE(srobj, dims = 1:13)
+# Perform clustering
+srobj <- FindNeighbors(srobj, dims = 1:13)
+srobj <- FindClusters(srobj, resolution = 0.5)
+
+# Generate t-SNE visualization
+srobj <- RunTSNE(srobj, dims = 1:13)
+
+pdf('SRR14294834_clustering.pdf', width = 10)
 DimPlot(srobj, reduction = "tsne")
-# srobj = RunUMAP(srobj, dims: 1:13)
+dev.off()
+
+# Optional UMAP visualization
+# srobj <- RunUMAP(srobj, dims = 1:13)
 # DimPlot(srobj, reduction = "umap")
+
+#-------------------------------------------------------------------------------
+# Save processed object
+#-------------------------------------------------------------------------------
+
+saveRDS(srobj, file = "SRR14294834_processed.rds")
+
+# Print final cluster information
+message("Number of clusters identified: ", length(levels(Idents(srobj))))
